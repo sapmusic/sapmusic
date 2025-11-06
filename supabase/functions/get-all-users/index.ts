@@ -44,24 +44,42 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'Permission denied. Admin role required.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     
-    // 3. If the user is an admin, fetch all users from auth.
+    // 3. If the user is an admin, fetch all users from auth using pagination.
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
     
-    const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000, // Fetch up to 1000 users. Adjust if you have more.
-    });
+    let allUsers = [];
+    let page = 1;
+    const perPage = 1000; // Supabase Auth admin API max limit per page
 
-    if (error) {
-      console.error('Error listing users:', error.message);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    while (true) {
+        const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({
+            page: page,
+            perPage: perPage,
+        });
+
+        if (error) {
+            console.error('Error listing users:', error.message);
+            return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (users && users.length > 0) {
+            allUsers = allUsers.concat(users);
+        }
+        
+        // If we received fewer users than the page limit, we've reached the end.
+        if (!users || users.length < perPage) {
+            break;
+        }
+        
+        page++;
     }
 
-    // 4. Return the list of users.
-    return new Response(JSON.stringify({ users }), {
+
+    // 4. Return the complete list of users.
+    return new Response(JSON.stringify({ users: allUsers }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 

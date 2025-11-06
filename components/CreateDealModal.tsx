@@ -4,14 +4,16 @@ import { XIcon } from './icons/XIcon';
 import { SyncIcon } from './icons/SyncIcon';
 
 interface CreateDealModalProps {
-  song: RegisteredSong;
+  song?: RegisteredSong;
+  catalogSongs: RegisteredSong[];
   onClose: () => void;
   onCreateDeal: (deal: Omit<SyncDeal, 'id' | 'status' | 'offerDate'>) => void;
 }
 
 const DEAL_TYPES = ['TV Show', 'Film', 'Advertisement', 'Video Game', 'Web Series', 'Other'];
 
-const CreateDealModal: React.FC<CreateDealModalProps> = ({ song, onClose, onCreateDeal }) => {
+const CreateDealModal: React.FC<CreateDealModalProps> = ({ song, catalogSongs, onClose, onCreateDeal }) => {
+    const [selectedSongId, setSelectedSongId] = useState(song?.id || '');
     const [dealType, setDealType] = useState(DEAL_TYPES[0]);
     const [licensee, setLicensee] = useState('');
     const [fee, setFee] = useState<number | ''>('');
@@ -20,13 +22,17 @@ const CreateDealModal: React.FC<CreateDealModalProps> = ({ song, onClose, onCrea
     const [error, setError] = useState('');
 
     const handleSubmit = () => {
+        if (!selectedSongId) {
+            setError('You must select a song for the deal.');
+            return;
+        }
         if (!dealType || !licensee.trim() || !fee || fee <= 0 || !terms.trim() || !expiryDate) {
             setError('All fields are required. Fee must be a positive number.');
             return;
         }
 
         onCreateDeal({
-            songId: song.id,
+            songId: selectedSongId,
             dealType,
             licensee,
             fee: Number(fee),
@@ -47,13 +53,26 @@ const CreateDealModal: React.FC<CreateDealModalProps> = ({ song, onClose, onCrea
                 <header className="flex-shrink-0 flex items-center justify-between p-4 border-b border-slate-700">
                     <div>
                         <h2 className="text-xl font-bold text-white">Create Sync Deal</h2>
-                        <p className="text-sm text-slate-400">For: {song.title} - {song.artist}</p>
+                        {song && <p className="text-sm text-slate-400">For: {song.title} - {song.artist}</p>}
                     </div>
                     <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:bg-slate-700 hover:text-white">
                         <XIcon className="w-6 h-6" />
                     </button>
                 </header>
                 <main className="p-6 space-y-4">
+                     {!song && (
+                        <div>
+                            <label className="text-sm text-slate-300 block mb-1">Song *</label>
+                            <select
+                                value={selectedSongId}
+                                onChange={e => setSelectedSongId(e.target.value)}
+                                className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2"
+                            >
+                                <option value="" disabled>Select a song from the catalog...</option>
+                                {catalogSongs.map(s => <option key={s.id} value={s.id}>{s.title} - {s.artist}</option>)}
+                            </select>
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm text-slate-300 block mb-1">Licensee *</label>

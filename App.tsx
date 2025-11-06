@@ -451,75 +451,6 @@ const App: React.FC = () => {
     }
   };
   
-  const createUser = async (email: string, password: string): Promise<{ success: boolean; error?: any }> => {
-    // Derive a default name from the email for the user profile.
-    const name = email.split('@')[0];
-
-    // Invoke the edge function to securely create a user with admin privileges.
-    // This function auto-confirms the user, so no confirmation email is sent.
-    const { data, error } = await supabase.functions.invoke('create-user-by-admin', {
-        body: { name, email, password },
-    });
-
-    if (error) {
-        console.error("Error creating user via function:", error);
-        const errorMessage = error.context?.error || error.message || 'An unknown error occurred during user creation.';
-        return { success: false, error: { message: errorMessage } };
-    }
-    
-    const newUserAuth = data.user;
-
-    if (newUserAuth) {
-        // The database trigger `on_auth_user_created` creates the profile.
-        // Fetch the new user profile to add it to the local state for immediate UI update.
-        // We'll retry a few times to mitigate race conditions with the DB trigger.
-        let newUserData = null;
-        let profileError: any = null;
-
-        for (let i = 0; i < 3; i++) {
-            const { data: fetchedData, error: fetchedError } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', newUserAuth.id)
-                .single();
-
-            if (fetchedData) {
-                newUserData = fetchedData;
-                profileError = null;
-                break;
-            }
-            
-            profileError = fetchedError;
-            // Wait 500ms before retrying
-            if (i < 2) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-        }
-
-        if (profileError) {
-            console.error("Error fetching new user profile after retries:", JSON.stringify(profileError, null, 2));
-            const newUser: User = {
-                id: newUserAuth.id,
-                name: name,
-                email: newUserAuth.email!,
-                role: 'user', // Default role
-                status: 'active', // Default status
-                hasProfile: false,
-            };
-            setUsers(prevUsers => [...prevUsers, newUser]);
-            return { success: true };
-        }
-
-        if (newUserData) {
-            const newUser = reconstructUser(keysToCamel(newUserData));
-            setUsers(prevUsers => [...prevUsers, newUser]);
-            return { success: true };
-        }
-    }
-    
-    return { success: false, error: 'Could not retrieve new user data after creation.' };
-  };
-
   const addManagedWriter = async (writer: Omit<ManagedWriter, 'id' | 'userId'>): Promise<ManagedWriter | null> => {
     if (!currentUser) return null;
 
@@ -771,7 +702,7 @@ const App: React.FC = () => {
           return <Writers writers={managedWriters} onAddWriter={addManagedWriter} />;
       case 'user-management':
           return currentUser.role === 'admin' 
-            ? <UserManagement users={users} onToggleStatus={toggleUserStatus} currentUser={currentUser} onUpdateRole={updateUserRole} onCreateUser={createUser} />
+            ? <UserManagement users={users} onToggleStatus={toggleUserStatus} currentUser={currentUser} onUpdateRole={updateUserRole} />
             : <div className="p-8 text-slate-400">Access Denied.</div>;
       case 'earnings':
           if(currentUser.role === 'admin') {
