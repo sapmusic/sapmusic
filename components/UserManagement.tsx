@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { User, Role } from '../types';
 
@@ -19,8 +20,8 @@ const UserCard: React.FC<{
     return (
         <div className="bg-slate-800 p-4 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-colors hover:bg-slate-700/50">
             <div>
-                <p className="font-semibold text-white">{user.name}</p>
-                <p className="text-sm text-slate-400">{user.email}</p>
+                <p className="font-semibold text-white">{user.name !== user.email ? user.name : user.email}</p>
+                {user.name !== user.email && <p className="text-sm text-slate-400">{user.email}</p>}
                 {user.hasProfile === false && (
                     <p className="text-xs text-yellow-400 mt-1">This user is registered but has no profile record. Management features are disabled until their profile is created.</p>
                 )}

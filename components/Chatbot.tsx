@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, ChatMessage, ChatSession } from '../types';
 import { ChatBubbleIcon } from './icons/ChatBubbleIcon';
@@ -9,10 +10,9 @@ interface LiveChatWidgetProps {
     session: ChatSession | undefined;
     messages: ChatMessage[];
     onSendMessage: (text: string, user: User) => void;
-    isTyping: boolean;
 }
 
-const Chatbot: React.FC<LiveChatWidgetProps> = ({ currentUser, session, messages, onSendMessage, isTyping }) => {
+const Chatbot: React.FC<LiveChatWidgetProps> = ({ currentUser, session, messages, onSendMessage }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -25,7 +25,7 @@ const Chatbot: React.FC<LiveChatWidgetProps> = ({ currentUser, session, messages
         if (isOpen) {
             scrollToBottom();
         }
-    }, [messages, isOpen, isTyping]);
+    }, [messages, isOpen]);
 
     const handleSendMessage = (e: React.FormEvent) => {
         e.preventDefault();
@@ -102,18 +102,6 @@ const Chatbot: React.FC<LiveChatWidgetProps> = ({ currentUser, session, messages
                             </div>
                         </div>
                     ))}
-                    {isTyping && (
-                        <div className="flex justify-start">
-                            <div className="max-w-xs md:max-w-sm px-4 py-2 rounded-2xl bg-slate-700 text-slate-200 rounded-bl-none">
-                                <p className="text-sm font-semibold mb-0.5">Support Assistant</p>
-                                <div className="flex items-center gap-1.5 py-2">
-                                    <span className="h-2 w-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                                    <span className="h-2 w-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                                    <span className="h-2 w-2 bg-slate-400 rounded-full animate-bounce"></span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                     <div ref={messagesEndRef} />
                 </div>
                 

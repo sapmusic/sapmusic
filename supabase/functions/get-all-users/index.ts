@@ -21,18 +21,49 @@ serve(async (req: Request) => {
   }
 
   try {
+    // FIX: Add explicit checks for all required environment variables.
+    // This provides a clear error message if the function is not configured correctly.
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+    const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+        console.error('Missing one or more required environment variables.');
+        return new Response(
+            JSON.stringify({ error: 'Server configuration error: Missing environment variables.' }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+    }
+    
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Authorization header is required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // 1. Create a Supabase client with the Auth context of the user invoking the function.
     const userSupabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY,
+      { global: { headers: { Authorization: authHeader } } }
     )
 
     // 2. Check if the user is authenticated and is an admin.
-    const { data: { user } } = await userSupabaseClient.auth.getUser();
-    if (!user) {
+    // FIX: Safely destructure user data and handle potential errors.
+    // A crash here would cause a generic network error on the client.
+    const { data: userData, error: userError } = await userSupabaseClient.auth.getUser();
+
+    if (userError) {
+      console.error('Authentication error:', userError.message);
+      return new Response(JSON.stringify({ error: 'Failed to authenticate user.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    if (!userData.user) {
       return new Response(JSON.stringify({ error: 'Authentication required' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+    const user = userData.user;
 
     const { data: adminProfile, error: profileError } = await userSupabaseClient
       .from('users')
@@ -44,42 +75,68 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'Permission denied. Admin role required.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     
-    // 3. If the user is an admin, fetch all users from auth using pagination.
+    // 3. If the user is an admin, fetch all data using the service role key to bypass RLS.
     const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY
     );
     
-    let allUsers = [];
+    // Fetch all profiles from the `users` table.
+    const { data: profilesData, error: profilesDbError } = await supabaseAdmin.from('users').select('*');
+    if (profilesDbError) throw profilesDbError;
+
+    // Fetch all users from `auth.users` using pagination.
+    let allAuthUsers: any[] = [];
     let page = 1;
-    const perPage = 1000; // Supabase Auth admin API max limit per page
+    const perPage = 1000;
 
     while (true) {
-        const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({
-            page: page,
-            perPage: perPage,
-        });
+        // FIX: Safely destructure the response from listUsers to prevent a crash if `data` is null on error.
+        const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
 
         if (error) {
-            console.error('Error listing users:', error.message);
-            return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            console.error(`Error fetching auth users on page ${page}:`, error.message);
+            throw error; // Let the main catch block handle the response
         }
 
-        if (users && users.length > 0) {
-            allUsers = allUsers.concat(users);
-        }
+        const users = data?.users ?? [];
         
-        // If we received fewer users than the page limit, we've reached the end.
-        if (!users || users.length < perPage) {
-            break;
+        if (users.length > 0) {
+            allAuthUsers.push(...users);
+        }
+
+        if (users.length < perPage) {
+            break; // This was the last page
         }
         
         page++;
     }
 
+    // 4. Merge the two lists.
+    const profilesMap = new Map(profilesData.map(p => [p.id, p]));
 
-    // 4. Return the complete list of users.
-    return new Response(JSON.stringify({ users: allUsers }), {
+    const mergedUsers = allAuthUsers.map(authUser => {
+        const profile = profilesMap.get(authUser.id);
+        // FIX: Add explicit type check to ensure `profile` is an object before spreading.
+        // The Deno/TypeScript environment may not infer this correctly from a truthiness check alone.
+        if (profile && typeof profile === 'object') {
+            // User has a profile; return the full profile object and mark it as such.
+            return { ...profile, hasProfile: true };
+        } else {
+            // User exists in auth but not in profiles table. Create a partial object.
+            return {
+                id: authUser.id,
+                name: authUser.user_metadata?.name || authUser.email,
+                email: authUser.email,
+                role: 'user',
+                status: 'active',
+                hasProfile: false,
+            };
+        }
+    });
+
+    // 5. Return the complete, merged list of users.
+    return new Response(JSON.stringify({ users: mergedUsers }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 

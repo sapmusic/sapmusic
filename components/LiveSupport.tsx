@@ -1,6 +1,9 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatSession, ChatMessage, User } from '../types';
 import { SendIcon } from './icons/SendIcon';
+import { ChevronLeftIcon } from './icons/ChevronLeftIcon';
 
 const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -51,6 +54,7 @@ const LiveSupport: React.FC<LiveSupportProps> = ({ sessions, messages, users, on
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const [showChatViewOnMobile, setShowChatViewOnMobile] = useState(false);
 
     const sortedSessions = [...sessions].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     
@@ -70,6 +74,7 @@ const LiveSupport: React.FC<LiveSupportProps> = ({ sessions, messages, users, on
     const handleSelectSession = (sessionId: string) => {
         setSelectedSessionId(sessionId);
         onSessionSelect(sessionId);
+        setShowChatViewOnMobile(true);
     };
 
     const handleSendMessage = (e: React.FormEvent) => {
@@ -85,7 +90,7 @@ const LiveSupport: React.FC<LiveSupportProps> = ({ sessions, messages, users, on
     return (
         <div className="flex h-full max-h-[calc(100vh-160px)] bg-slate-800/50 rounded-lg overflow-hidden border border-slate-700/50">
             {/* Session List */}
-            <aside className="w-full md:w-1/3 border-r border-slate-700/50 flex flex-col">
+            <aside className={`w-full md:w-1/3 border-r border-slate-700/50 flex-col ${showChatViewOnMobile ? 'hidden md:flex' : 'flex'}`}>
                 <div className="p-4 border-b border-slate-700/50 flex-shrink-0">
                     <h2 className="text-xl font-bold text-white">Inbox ({sortedSessions.length})</h2>
                 </div>
@@ -112,10 +117,13 @@ const LiveSupport: React.FC<LiveSupportProps> = ({ sessions, messages, users, on
             </aside>
             
             {/* Chat View */}
-            <main className="w-2/3 flex-col hidden md:flex">
+            <main className={`w-full md:w-2/3 flex-col ${showChatViewOnMobile ? 'flex' : 'hidden md:flex'}`}>
                 {selectedSessionId && selectedSessionUser ? (
                     <>
-                        <header className="p-4 border-b border-slate-700/50 flex-shrink-0">
+                        <header className="p-4 border-b border-slate-700/50 flex-shrink-0 flex items-center gap-4">
+                            <button onClick={() => setShowChatViewOnMobile(false)} className="md:hidden p-1 text-slate-400 hover:text-white">
+                                <ChevronLeftIcon className="h-6 w-6" />
+                            </button>
                             <h3 className="font-bold text-white text-lg">Chat with {selectedSessionUser.name}</h3>
                         </header>
                         <div className="flex-1 overflow-y-auto p-4 space-y-4">

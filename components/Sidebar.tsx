@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { DashboardIcon } from './icons/DashboardIcon';
 import { AgreementIcon } from './icons/AgreementIcon';
@@ -23,6 +24,9 @@ interface SidebarProps {
   userRole: Role;
   onLogout: () => void;
   isAgreementEditorEnabled: boolean;
+  isChatEnabled: boolean;
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: (isOpen: boolean) => void;
 }
 
 const NavItem: React.FC<{
@@ -46,28 +50,33 @@ const NavItem: React.FC<{
   );
 };
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole, onLogout, isAgreementEditorEnabled }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole, onLogout, isAgreementEditorEnabled, isChatEnabled, isSidebarOpen, setIsSidebarOpen }) => {
+  const handleNavigation = (view: View) => {
+    setCurrentView(view);
+    setIsSidebarOpen(false);
+  };
+  
   return (
-    <aside className="w-64 bg-slate-900 border-r border-slate-700/50 p-6 flex-shrink-0 flex flex-col">
+    <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 border-r border-slate-700/50 p-6 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <nav className="flex-1">
         <ul className="space-y-2">
           <NavItem
             icon={<DashboardIcon className="h-5 w-5" />}
             label="Dashboard"
             isActive={currentView === 'dashboard'}
-            onClick={() => setCurrentView('dashboard')}
+            onClick={() => handleNavigation('dashboard')}
           />
           <NavItem
             icon={<AgreementIcon className="h-5 w-5" />}
             label="Agreements"
             isActive={currentView === 'agreements'}
-            onClick={() => setCurrentView('agreements')}
+            onClick={() => handleNavigation('agreements')}
           />
           <NavItem
               icon={<WritersIcon className="h-5 w-5" />}
               label={userRole === 'admin' ? "Writers Library" : "My Writers"}
               isActive={currentView === 'writers'}
-              onClick={() => setCurrentView('writers')}
+              onClick={() => handleNavigation('writers')}
             />
           
           {userRole === 'user' && (
@@ -75,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole
                 icon={<EarningsIcon className="h-5 w-5" />}
                 label="Earnings"
                 isActive={currentView === 'earnings'}
-                onClick={() => setCurrentView('earnings')}
+                onClick={() => handleNavigation('earnings')}
               />
            )}
           
@@ -87,50 +96,52 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole
                 icon={<CheckBadgeIcon className="h-5 w-5" />}
                 label="Song Approvals"
                 isActive={currentView === 'approval'}
-                onClick={() => setCurrentView('approval')}
+                onClick={() => handleNavigation('approval')}
               />
                <NavItem
                 icon={<SyncIcon className="h-5 w-5" />}
                 label="Sync Licensing"
                 isActive={currentView === 'sync-licensing'}
-                onClick={() => setCurrentView('sync-licensing')}
+                onClick={() => handleNavigation('sync-licensing')}
               />
-              <NavItem
-                icon={<InboxIcon className="h-5 w-5" />}
-                label="Live Support"
-                isActive={currentView === 'live-support'}
-                onClick={() => setCurrentView('live-support')}
-              />
+              {isChatEnabled && (
+                <NavItem
+                  icon={<InboxIcon className="h-5 w-5" />}
+                  label="Live Support"
+                  isActive={currentView === 'live-support'}
+                  onClick={() => handleNavigation('live-support')}
+                />
+              )}
                <NavItem
                 icon={<UsersIcon className="h-5 w-5" />}
                 label="User Management"
                 isActive={currentView === 'user-management'}
-                onClick={() => setCurrentView('user-management')}
+                onClick={() => handleNavigation('user-management')}
               />
                <NavItem
                 icon={<EarningsIcon className="h-5 w-5" />}
                 label="Manage Earnings"
                 isActive={currentView === 'earnings'}
-                onClick={() => setCurrentView('earnings')}
+                onClick={() => handleNavigation('earnings')}
               />
                <NavItem
                 icon={<CreditCardIcon className="h-5 w-5" />}
                 label="Payouts"
                 isActive={currentView === 'payouts'}
-                onClick={() => setCurrentView('payouts')}
+                onClick={() => handleNavigation('payouts')}
               />
               <NavItem
                 icon={<KeyIcon className="h-5 w-5" />}
                 label="Manager Roles"
                 isActive={currentView === 'manager-roles'}
-                onClick={() => setCurrentView('manager-roles')}
+                onClick={() => handleNavigation('manager-roles')}
               />
               {isAgreementEditorEnabled && (
                 <NavItem
                   icon={<EditIcon className="h-5 w-5" />}
                   label="Agreement Template"
                   isActive={currentView === 'agreement-template'}
-                  onClick={() => setCurrentView('agreement-template')}
+                  onClick={() => handleNavigation('agreement-template')}
                 />
               )}
             </>
@@ -142,7 +153,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole
             icon={<UserCircleIcon className="h-5 w-5" />}
             label="Profile"
             isActive={currentView === 'profile'}
-            onClick={() => setCurrentView('profile')}
+            onClick={() => handleNavigation('profile')}
           />
           <NavItem
             icon={<LogoutIcon className="h-5 w-5" />}
@@ -155,7 +166,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, userRole
       <div className="mt-auto">
         {userRole === 'user' && (
             <button 
-              onClick={() => setCurrentView('new-song')}
+              onClick={() => handleNavigation('new-song')}
               className="w-full flex items-center justify-center gap-2 bg-amber-500 text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-amber-400 transition-colors duration-200"
             >
               <AddIcon className="h-5 w-5" />

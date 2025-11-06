@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -8,7 +9,7 @@ import SongRegistration from './components/SongRegistration';
 import Agreements from './components/Agreements';
 import Writers from './components/Writers';
 import { RegisteredSong, ManagedWriter, User, Earning, PayoutRequest, PayoutStatus, AgreementStatus, ChatSession, ChatMessage, SyncDeal, DealStatus, SyncStatus, PayPalDetails, BankDetails, Role } from './types';
-import { mockWriters, mockUsers, mockEarnings, mockPayouts, mockChatSessions, mockChatMessages, mockSyncDeals, PUBLISHING_AGREEMENT_TEXT } from './constants';
+import { mockWriters, mockUsers, mockEarnings, mockPayouts, mockSyncDeals, PUBLISHING_AGREEMENT_TEXT } from './constants';
 import ManageEarnings from './components/ManageEarnings';
 import UserManagement from './components/UserManagement';
 import ProfileSettings from './components/ProfileSettings';
@@ -19,7 +20,6 @@ import Chatbot from './components/Chatbot';
 import Login from './components/Login';
 import AdminApproval from './components/AdminApproval';
 import LiveSupport from './components/LiveSupport';
-import { getChatbotResponse } from './services/geminiService';
 import SyncLicensing from './components/SyncLicensing';
 import SongDetailModal from './components/SongDetailModal';
 import { supabase } from './services/supabase';
@@ -100,13 +100,14 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [earnings, setEarnings] = useState<Earning[]>(mockEarnings);
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>(mockPayouts);
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>(mockChatSessions);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(mockChatMessages);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [syncDeals, setSyncDeals] = useState<SyncDeal[]>(mockSyncDeals);
-  const [isBotTyping, setIsBotTyping] = useState(false);
   const [viewingSong, setViewingSong] = useState<RegisteredSong | null>(null);
   const [agreementTemplate, setAgreementTemplate] = useState<string>(PUBLISHING_AGREEMENT_TEXT);
   const [isAgreementTemplateFeatureEnabled, setIsAgreementTemplateFeatureEnabled] = useState(true);
+  const [isChatFeatureEnabled, setIsChatFeatureEnabled] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -156,9 +157,10 @@ const App: React.FC = () => {
                 .single();
             
             // Fetch all data in parallel. RLS handles filtering based on user role.
-            const [writersResult, songsResult] = await Promise.all([
+            const [writersResult, songsResult, chatSessionsResult] = await Promise.all([
                 supabase.from('managed_writers').select('id, user_id, name, dob, society, ipi:ipi_cae'),
-                supabase.from('songs').select(SONG_SELECT_QUERY)
+                supabase.from('songs').select(SONG_SELECT_QUERY),
+                supabase.from('chat_sessions').select('*') // RLS filters this for the current user or admin
             ]);
             
             if (writersResult.error) {
@@ -179,6 +181,31 @@ const App: React.FC = () => {
                 setSongs(songsData.sort((a: RegisteredSong, b: RegisteredSong) => new Date(b.registrationDate).getTime() - new Date(a.registrationDate).getTime()));
             }
 
+            if (chatSessionsResult.error) {
+                if (chatSessionsResult.error.message?.includes("Could not find the table 'public.chat_sessions'")) {
+                    console.warn("Chat feature disabled: 'chat_sessions' table not found. This is expected if the chat schema has not been run.");
+                    setIsChatFeatureEnabled(false);
+                    setChatSessions([]);
+                    setChatMessages([]);
+                } else {
+                    console.error("Error fetching chat sessions:", JSON.stringify(chatSessionsResult.error, null, 2));
+                }
+            } else if (chatSessionsResult.data && isChatFeatureEnabled) {
+                const fetchedSessions = keysToCamel(chatSessionsResult.data).sort((a: ChatSession, b: ChatSession) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                setChatSessions(fetchedSessions);
+
+                const sessionIds = fetchedSessions.map((s: ChatSession) => s.id);
+                if (sessionIds.length > 0) {
+                    const { data: messagesData, error: messagesError } = await supabase
+                        .from('chat_messages')
+                        .select('*')
+                        .in('session_id', sessionIds)
+                        .order('timestamp', { ascending: true });
+                    if(messagesError) console.error("Error fetching chat messages:", messagesError);
+                    else if (messagesData) setChatMessages(keysToCamel(messagesData));
+                }
+            }
+
 
             if (error) {
                 console.error("Error fetching user profile:", error.message, error);
@@ -195,48 +222,33 @@ const App: React.FC = () => {
                 if (profile.role === 'admin') {
                     setCurrentUser({ ...mockUsers.find(u => u.role === 'admin')!, ...profile });
 
-                    // Fetch both profiles and auth users in parallel for efficiency and resilience.
-                    const [profilesResult, authUsersResult] = await Promise.all([
-                        supabase.from('users').select('*'),
-                        supabase.functions.invoke('get-all-users')
-                    ]);
+                    // Admin: Fetch the complete, merged user list from the edge function.
+                    try {
+                        const { data: allUsersData, error: allUsersError } = await supabase.functions.invoke('get-all-users');
 
-                    let profilesMap = new Map<string, User>();
-                    if (profilesResult.error) {
-                        console.error("Admin could not fetch user profiles:", profilesResult.error.message);
-                        // Proceed with an empty map; auth users will be the source of truth.
-                    } else if (profilesResult.data) {
-                        const profiles = (keysToCamel(profilesResult.data) as any[]).map(reconstructUser);
-                        profilesMap = new Map<string, User>(profiles.map(p => [p.id, p]));
-                    }
-
-                    if (authUsersResult.error) {
-                        console.error("CRITICAL: Admin could not fetch auth users:", authUsersResult.error.message);
-                        // As a fallback, show only the profiles that were successfully fetched.
-                        setUsers(Array.from(profilesMap.values()));
-                    } else if (authUsersResult.data.users) {
-                        const authUsers = authUsersResult.data.users;
-                        const allSystemUsers: User[] = authUsers.map((authUser: any) => {
-                            if (profilesMap.has(authUser.id)) {
-                                // Profile exists: merge data, using auth email as source of truth.
-                                return { ...profilesMap.get(authUser.id)!, email: authUser.email };
-                            } else {
-                                // No profile: create a placeholder user object.
-                                return {
-                                    id: authUser.id,
-                                    name: authUser.user_metadata?.name || authUser.email.split('@')[0],
-                                    email: authUser.email,
-                                    role: 'user',
-                                    status: 'active',
-                                    hasProfile: false,
-                                };
-                            }
-                        });
-                        setUsers(allSystemUsers);
-                    } else {
-                        // Function succeeded but returned no users; this is unlikely but possible.
-                        // Fall back to showing profiles.
-                        setUsers(Array.from(profilesMap.values()));
+                        if (allUsersError) {
+                            console.error("CRITICAL: Admin could not fetch the user list:", allUsersError.message);
+                            setUsers([]); // Show an empty list on critical error.
+                        } else if (allUsersData && allUsersData.users) {
+                            // The edge function returns a merged list of auth users and profiles.
+                            // We process it here to match the client-side User type.
+                            const finalUsers = allUsersData.users.map((rawUser: any) => {
+                                if (rawUser.hasProfile) {
+                                    // This user has a full profile from the `users` table.
+                                    return reconstructUser(keysToCamel(rawUser));
+                                } else {
+                                    // This user only exists in `auth.users`, so the object is already shaped correctly.
+                                    return rawUser;
+                                }
+                            });
+                            setUsers(finalUsers);
+                        } else {
+                            // No error, but no data.
+                            setUsers([]);
+                        }
+                    } catch (e: any) {
+                        console.error("FATAL: Error invoking 'get-all-users' function:", e.message);
+                        setUsers([]);
                     }
                 } else {
                      // For regular users, link to mock data if they are a demo user, otherwise just use their profile
@@ -253,10 +265,47 @@ const App: React.FC = () => {
             setCurrentView('dashboard');
             setManagedWriters([]);
             setSongs([]);
+            setChatMessages([]);
+            setChatSessions([]);
         }
     };
     fetchUserData();
   }, [session]);
+
+  useEffect(() => {
+    if (!currentUser || !isChatFeatureEnabled) return;
+
+    const handleNewMessage = (payload: any) => {
+        const newMessage = keysToCamel(payload.new) as ChatMessage;
+        setChatMessages(prev => {
+            if (prev.find(m => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
+        });
+    };
+
+    const handleSessionChange = (payload: any) => {
+        const newSession = keysToCamel(payload.new) as ChatSession;
+        setChatSessions(prev => {
+            const existing = prev.find(s => s.id === newSession.id);
+            const otherSessions = prev.filter(s => s.id !== newSession.id);
+            
+            return [newSession, ...otherSessions].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        });
+    };
+
+    const messagesSubscription = supabase.channel('chat_messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, handleNewMessage)
+      .subscribe();
+
+    const sessionsSubscription = supabase.channel('chat_sessions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleSessionChange)
+      .subscribe();
+
+    return () => {
+        supabase.removeChannel(messagesSubscription);
+        supabase.removeChannel(sessionsSubscription);
+    };
+}, [currentUser, isChatFeatureEnabled]);
 
 
   const handleLogout = async () => {
@@ -580,105 +629,65 @@ const App: React.FC = () => {
     };
 
 
-  const handleAdminSendMessage = (text: string, sessionId: string, senderId: string) => {
-      const sender = users.find(u => u.id === senderId) || { id: 'admin', name: 'Admin' };
+  const handleAdminSendMessage = async (text: string, sessionId: string, senderId: string) => {
+    const now = new Date().toISOString();
+    const adminUser = users.find(u => u.id === senderId && u.role === 'admin') || currentUser;
+    if (!adminUser) return;
       
-      const newMessage: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          sessionId,
-          senderId,
-          senderName: sender.name,
-          text,
-          timestamp: new Date().toISOString(),
-      };
+    // 1. Insert the new message
+    const { error: messageError } = await supabase.from('chat_messages').insert({
+        session_id: sessionId,
+        sender_id: adminUser.id,
+        sender_name: adminUser.name,
+        text,
+        timestamp: now,
+    });
+    if (messageError) console.error("Error sending admin message:", messageError);
 
-      setChatMessages(prev => [...prev, newMessage]);
-
-      setChatSessions(prev => prev.map(session => 
-          session.id === sessionId 
-          ? { 
-              ...session, 
-              lastMessage: text, 
-              timestamp: newMessage.timestamp,
-              isReadByAdmin: true
-            }
-          : session
-      ));
+    // 2. Update the session's last message and timestamp, and mark as read
+    const { error: sessionError } = await supabase.from('chat_sessions').update({
+        last_message: text,
+        timestamp: now,
+        is_read_by_admin: true,
+    }).eq('id', sessionId);
+    if(sessionError) console.error("Error updating session from admin:", sessionError);
   };
   
   const handleUserSendMessage = async (text: string, user: User) => {
       const sessionId = `session-${user.id}`;
-      const sessionExists = chatSessions.some(s => s.id === sessionId);
+      const now = new Date().toISOString();
 
-      const newMessage: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          sessionId,
-          senderId: user.id,
-          senderName: user.name,
-          text,
-          timestamp: new Date().toISOString(),
-      };
+      // Upsert session (creates if not exists, updates if it does)
+      const { error: sessionError } = await supabase.from('chat_sessions').upsert({
+          id: sessionId,
+          user_id: user.id,
+          user_name: user.name,
+          last_message: text,
+          timestamp: now,
+          is_read_by_admin: false,
+      });
+      if (sessionError) console.error("Error upserting session:", sessionError);
 
-      if (!sessionExists) {
-          const newSession: ChatSession = {
-              id: sessionId,
-              userId: user.id,
-              userName: user.name,
-              lastMessage: text,
-              timestamp: newMessage.timestamp,
-              isReadByAdmin: false,
-          };
-          setChatSessions(prev => [newSession, ...prev.filter(s => s.id !== sessionId)]);
-      } else {
-            setChatSessions(prev => prev.map(session => 
-              session.id === sessionId 
-              ? { ...session, lastMessage: text, timestamp: newMessage.timestamp, isReadByAdmin: false }
-              : session
-          ));
-      }
-      
-      setChatMessages(prev => [...prev, newMessage]);
-
-      // Gemini bot response logic
-      setIsBotTyping(true);
-      try {
-          const response = await getChatbotResponse(text);
-
-          const botMessage: ChatMessage = {
-              id: `msg-${Date.now()}-bot`,
-              sessionId,
-              senderId: 'gemini-assistant',
-              senderName: 'Support Assistant',
-              text: response.text,
-              groundingChunks: response.groundingChunks,
-              timestamp: new Date().toISOString(),
-          };
-          setChatMessages(prev => [...prev, botMessage]);
-
-          setChatSessions(prev => prev.map(session => 
-              session.id === sessionId 
-              ? { ...session, lastMessage: response.text, timestamp: botMessage.timestamp, isReadByAdmin: false }
-              : session
-          ));
-
-      } catch (error) {
-          console.error("Error getting chatbot response:", error);
-          const errorMessage: ChatMessage = {
-              id: `msg-${Date.now()}-error`,
-              sessionId,
-              senderId: 'gemini-assistant',
-              senderName: 'Support Assistant',
-              text: "I'm having trouble connecting right now. An admin has been notified.",
-              timestamp: new Date().toISOString(),
-          };
-          setChatMessages(prev => [...prev, errorMessage]);
-      } finally {
-          setIsBotTyping(false);
-      }
+      // Insert message
+      const { error: messageError } = await supabase.from('chat_messages').insert({
+          session_id: sessionId,
+          sender_id: user.id,
+          sender_name: user.name,
+          text: text,
+          timestamp: now,
+      });
+      if (messageError) console.error("Error sending message:", messageError);
   };
   
-  const markSessionAsRead = (sessionId: string) => {
-      setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isReadByAdmin: true } : s));
+  const markSessionAsRead = async (sessionId: string) => {
+      const { error } = await supabase
+          .from('chat_sessions')
+          .update({ is_read_by_admin: true })
+          .eq('id', sessionId);
+      if (error) console.error("Error marking session as read:", error);
+      else {
+          setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isReadByAdmin: true } : s));
+      }
   };
 
 
@@ -719,9 +728,9 @@ const App: React.FC = () => {
               ? <AdminApproval songs={songs} users={users} onUpdateStatus={updateSongStatus} />
               : <div className="p-8 text-slate-400">Access Denied.</div>;
        case 'live-support':
-          return currentUser.role === 'admin'
+          return currentUser.role === 'admin' && isChatFeatureEnabled
               ? <LiveSupport sessions={chatSessions} messages={chatMessages} users={users} onSendMessage={handleAdminSendMessage} onSessionSelect={markSessionAsRead} />
-              : <div className="p-8 text-slate-400">Access Denied.</div>;
+              : <div className="p-8 text-slate-400">Access Denied. This feature may not be enabled on your instance.</div>;
       case 'sync-licensing':
           return currentUser.role === 'admin'
               ? <SyncLicensing songs={songs} deals={syncDeals} onUpdateSongSyncStatus={updateSongSyncStatus} onCreateDeal={createSyncDeal} />
@@ -746,28 +755,32 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100 flex-col">
-      <div className="flex flex-1 overflow-hidden">
+    <div className="relative h-screen bg-slate-900 text-slate-100 flex overflow-hidden">
         <Sidebar 
           currentView={currentView} 
           setCurrentView={setCurrentView} 
           userRole={currentUser.role} 
           onLogout={handleLogout} 
           isAgreementEditorEnabled={isAgreementTemplateFeatureEnabled}
+          isChatEnabled={isChatFeatureEnabled}
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
         />
+
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header onRegisterNew={() => setCurrentView('new-song')} />
+          <Header onRegisterNew={() => setCurrentView('new-song')} onToggleSidebar={() => setIsSidebarOpen(true)} />
           <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-800/50">
             {renderView()}
           </main>
         </div>
-      </div>
-       {currentUser && currentUser.role === 'user' && <Chatbot 
+
+       {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-30 md:hidden" />}
+
+       {currentUser && currentUser.role === 'user' && isChatFeatureEnabled && <Chatbot 
           currentUser={currentUser}
           session={chatSessions.find(s => s.userId === currentUser.id)}
           messages={chatMessages.filter(m => m.sessionId === `session-${currentUser.id}`)}
           onSendMessage={handleUserSendMessage}
-          isTyping={isBotTyping}
       />}
        {viewingSong && (
             <SongDetailModal
