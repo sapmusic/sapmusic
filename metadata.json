@@ -1,0 +1,7 @@
+{
+  "name": "Sap Music Group Publishing Admin",
+  "description": "A comprehensive web publishing administration app for Sap Music Group. It allows for fetching song data from Spotify, managing writer splits, and securing digital agreements with legally binding signatures.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
