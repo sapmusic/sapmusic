@@ -2,6 +2,7 @@
 
 
 
+
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -382,7 +383,7 @@ const App: React.FC = () => {
               society: writerData.society,
               ipi_cae: writerData.ipi,
           })
-          .select()
+          .select('id, user_id, name, dob, society, ipi:ipi_cae')
           .single();
       
       if (error) {
@@ -395,7 +396,12 @@ const App: React.FC = () => {
   };
   
   const handleUpdateUser = async (updatedUser: User) => {
+    // FIX: Use `upsert` instead of `update` to handle creation of new user profiles.
+    // This resolves a critical bug where new users could not save their initial profile.
     const payload: any = {
+      // id is required for upsert to know which row to update or insert
+      id: updatedUser.id,
+      email: updatedUser.email,
       name: updatedUser.name,
       role: updatedUser.role,
       status: updatedUser.status,
@@ -405,28 +411,44 @@ const App: React.FC = () => {
       payload.payout_type = updatedUser.payoutMethod.method;
       if (updatedUser.payoutMethod.method === 'paypal') {
         payload.paypal_email = updatedUser.payoutMethod.email;
+        // Null out bank fields to prevent data conflicts
+        payload.account_holder_name = null;
+        payload.bank_name = null;
+        payload.swift_bic = null;
+        payload.account_number_iban = null;
+        payload.country = null;
       } else {
         payload.account_holder_name = updatedUser.payoutMethod.accountHolderName;
         payload.bank_name = updatedUser.payoutMethod.bankName;
         payload.swift_bic = updatedUser.payoutMethod.swiftBic;
         payload.account_number_iban = updatedUser.payoutMethod.accountNumberIban;
         payload.country = updatedUser.payoutMethod.country;
+        // Null out paypal field
+        payload.paypal_email = null;
       }
     }
 
     const { data, error } = await supabase
         .from('users')
-        .update(payload)
-        .eq('id', updatedUser.id)
+        .upsert(payload)
         .select()
         .single();
     
     if (error) {
-      console.error("Error updating user profile:", error.message, error);
+      console.error("Error upserting user profile:", error.message, error);
     } else if(data) {
       const fullUser = reconstructUser(keysToCamel(data));
-      setCurrentUser(fullUser);
-      setUsers(prevUsers => prevUsers.map(u => u.id === fullUser.id ? fullUser : u));
+      // After a successful upsert, this user definitely has a profile.
+      setCurrentUser({ ...fullUser, hasProfile: true });
+      setUsers(prevUsers => {
+          const userIndex = prevUsers.findIndex(u => u.id === fullUser.id);
+          if (userIndex > -1) {
+              const newUsers = [...prevUsers];
+              newUsers[userIndex] = fullUser;
+              return newUsers;
+          }
+          return [...prevUsers, fullUser];
+      });
     }
   }
 

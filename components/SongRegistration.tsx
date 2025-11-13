@@ -1,3 +1,6 @@
+
+
+
 import React, { useState, useCallback } from 'react';
 import { summarizeAgreement } from '../services/geminiService';
 import { Writer, RegisteredSong, ManagedWriter, User } from '../types';
@@ -68,37 +71,11 @@ interface SongRegistrationProps {
   agreementTemplate: string;
 }
 
-const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationComplete, managedWriters, currentUser, onAddManagedWriter, onRegistrationSuccess, agreementTemplate }) => {
-  const [songData, setSongData] = useState<SongData>({
-    title: '', artist: '', album: '', artworkUrl: '', duration: '', isrc: '', upc: '',
-  });
-  const [step, setStep] = useState(1);
-  const [writers, setWriters] = useState<Writer[]>([]);
-  const [registrationDate] = useState(new Date().toISOString().split('T')[0]);
-  const [agreementText, setAgreementText] = useState(agreementTemplate.replace('[DATE]', new Date(registrationDate).toLocaleDateString()));
-  const [summary, setSummary] = useState('');
-  const [isSummarizing, setIsSummarizing] = useState(false);
-  const [signatureData, setSignatureData] = useState<string>('');
-  const [signatureType, setSignatureType] = useState<'draw' | 'type'>('draw');
-  const [hasAgreed, setHasAgreed] = useState(false);
-  const [submitForSync, setSubmitForSync] = useState(false);
-  
-  const [isUpdateWriterModalOpen, setIsUpdateWriterModalOpen] = useState(false);
-  const [isAddFromLibraryModalOpen, setIsAddFromLibraryModalOpen] = useState(false);
-  const [writerToUpdate, setWriterToUpdate] = useState<string | null>(null);
-
-  const [errors, setErrors] = useState<FormErrors>({ songData: {}, writers: {}, global: {} });
-  const [touched, setTouched] = useState({
-      songData: {} as Record<keyof SongData, boolean>,
-      writers: {} as Record<string, Record<keyof WriterErrors, boolean>>
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const validateField = useCallback((
+// FIX: Extracted validation logic into a pure function for synchronous use on submit.
+const getFieldError = (
     fieldName: keyof SongData | keyof WriterErrors,
     value: any,
-    writerId?: string
-  ) => {
+): string => {
     let error = '';
     const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
     const durationRegex = /^\d{1,2}:\d{2}$/;
@@ -142,6 +119,8 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
             if (!value) error = 'Society is required.';
             break;
         case 'ipi':
+            // IPI is often optional on forms, but we require it for saving managed writers.
+            // Let's treat it as required for full validation.
             if (!value) {
                 error = 'IPI number is required.';
             } else if (!ipiRegex.test(value)) {
@@ -149,7 +128,41 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
             }
             break;
     }
+    return error;
+};
 
+const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationComplete, managedWriters, currentUser, onAddManagedWriter, onRegistrationSuccess, agreementTemplate }) => {
+  const [songData, setSongData] = useState<SongData>({
+    title: '', artist: '', album: '', artworkUrl: '', duration: '', isrc: '', upc: '',
+  });
+  const [step, setStep] = useState(1);
+  const [writers, setWriters] = useState<Writer[]>([]);
+  const [registrationDate] = useState(new Date().toISOString().split('T')[0]);
+  const [agreementText, setAgreementText] = useState(agreementTemplate.replace('[DATE]', new Date(registrationDate).toLocaleDateString()));
+  const [summary, setSummary] = useState('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [signatureData, setSignatureData] = useState<string>('');
+  const [signatureType, setSignatureType] = useState<'draw' | 'type'>('draw');
+  const [hasAgreed, setHasAgreed] = useState(false);
+  const [submitForSync, setSubmitForSync] = useState(false);
+  
+  const [isUpdateWriterModalOpen, setIsUpdateWriterModalOpen] = useState(false);
+  const [isAddFromLibraryModalOpen, setIsAddFromLibraryModalOpen] = useState(false);
+  const [writerToUpdate, setWriterToUpdate] = useState<string | null>(null);
+
+  const [errors, setErrors] = useState<FormErrors>({ songData: {}, writers: {}, global: {} });
+  const [touched, setTouched] = useState({
+      songData: {} as Record<keyof SongData, boolean>,
+      writers: {} as Record<string, Record<keyof WriterErrors, boolean>>
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const validateField = useCallback((
+    fieldName: keyof SongData | keyof WriterErrors,
+    value: any,
+    writerId?: string
+  ) => {
+    const error = getFieldError(fieldName, value);
     if (writerId) {
         setErrors(prev => ({
             ...prev,
@@ -187,7 +200,7 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
     Object.keys(finalWriter).forEach(keyStr => {
       const key = keyStr as keyof WriterErrors;
       if (['name', 'role', 'dob', 'society', 'ipi'].includes(key)) {
-        validateField(key, finalWriter[key], finalWriter.id);
+        validateField(key, finalWriter[key as keyof Writer], finalWriter.id);
       }
     });
   };
@@ -199,26 +212,26 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
     }));
     const writer = writers.find(w => w.id === writerId);
     if (writer) {
-        validateField(field, writer[field], writerId);
+        validateField(field, (writer as any)[field], writerId);
     }
   };
 
   const handleProceedToStep2 = () => {
-    // Touch and validate all fields in step 1
-    const newTouched = { ...touched.songData };
     let hasErrors = false;
+    const newErrors: SongDataErrors = {};
+    const newTouched: Partial<Record<keyof SongData, boolean>> = {};
+
     (Object.keys(songData) as Array<keyof SongData>).forEach(key => {
-        newTouched[key] = true;
-        validateField(key, songData[key]);
-        if (errors.songData[key]) {
+        const error = getFieldError(key, songData[key]);
+        if (error) {
+            newErrors[key] = error;
             hasErrors = true;
         }
+        newTouched[key] = true;
     });
-     // Re-check required fields
-    if (!songData.title.trim()) { validateField('title', ''); hasErrors = true; }
-    if (!songData.artist.trim()) { validateField('artist', ''); hasErrors = true; }
 
-    setTouched(prev => ({ ...prev, songData: newTouched }));
+    setErrors(prev => ({ ...prev, songData: newErrors }));
+    setTouched(prev => ({ ...prev, songData: newTouched as any }));
 
     if (!hasErrors) {
         setStep(2);
@@ -271,57 +284,72 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
   };
   
   const handleSubmit = async () => {
+      const newErrors: FormErrors = { songData: {}, writers: {}, global: {} };
       let isFormValid = true;
-      const newTouched = { songData: { ...touched.songData }, writers: { ...touched.writers } };
-      const formErrors: FormErrors = { songData: {}, writers: {}, global: {} };
 
       // Validate song data
       (Object.keys(songData) as Array<keyof SongData>).forEach(key => {
-        newTouched.songData[key] = true;
-        validateField(key, songData[key]);
+        const error = getFieldError(key, songData[key]);
+        if (error) {
+            newErrors.songData[key] = error;
+            isFormValid = false;
+        }
       });
-      if (Object.values(errors.songData).some(e => e)) isFormValid = false;
-
+      
       // Validate writers
       writers.forEach(writer => {
+        const writerErrors: WriterErrors = {};
         (Object.keys({name: '', role: [], dob: '', society: '', ipi: ''}) as Array<keyof WriterErrors>).forEach(key => {
-            newTouched.writers[writer.id] = { ...newTouched.writers[writer.id], [key]: true };
-            validateField(key, writer[key], writer.id);
+            const error = getFieldError(key, (writer as any)[key]);
+            if (error) {
+                writerErrors[key] = error;
+                isFormValid = false;
+            }
         });
-        if(Object.values(errors.writers[writer.id] || {}).some(e => e)) isFormValid = false;
+        if (Object.keys(writerErrors).length > 0) {
+            newErrors.writers[writer.id] = writerErrors;
+        }
       });
 
       // Validate global conditions
       if (writers.reduce((acc, w) => acc + w.split, 0) !== 100) {
-          formErrors.global.splitTotal = 'Total split must equal 100%.';
+          newErrors.global.splitTotal = 'Total split must equal 100%.';
           isFormValid = false;
       }
       if (writers.length === 0 || !writers.every(w => w.agreed)) {
-          formErrors.global.allWritersAgreed = 'All writers must agree to their split.';
+          newErrors.global.allWritersAgreed = 'All writers must agree to their split.';
           isFormValid = false;
       }
       if (!signatureData) {
-          formErrors.global.signature = 'A signature is required to complete the agreement.';
+          newErrors.global.signature = 'A signature is required to complete the agreement.';
           isFormValid = false;
       }
       if (!hasAgreed) {
-          formErrors.global.agreement = 'You must agree to the terms.';
+          newErrors.global.agreement = 'You must agree to the terms.';
           isFormValid = false;
       }
       
-      setErrors(prev => ({...prev, global: formErrors.global}));
+      setErrors(newErrors);
+
+      // Touch all fields to show errors
+      const newTouched: any = { songData: {}, writers: {} };
+      (Object.keys(songData) as Array<keyof SongData>).forEach(key => { newTouched.songData[key] = true; });
+      writers.forEach(writer => {
+        newTouched.writers[writer.id] = {};
+        (Object.keys({name: '', role: [], dob: '', society: '', ipi: ''}) as Array<keyof WriterErrors>).forEach(key => {
+            newTouched.writers[writer.id][key] = true;
+        });
+      });
       setTouched(newTouched);
 
       if (!isFormValid) return;
 
       setIsSubmitting(true);
-      setErrors(prev => ({...prev, global: {...prev.global, agreement: undefined}}));
-
-      const writersToSubmit = [...writers];
-
-      // Automatically save any new writers to the user's library
-      await Promise.all(writersToSubmit.map(async (writer, index) => {
-          // A writer is new if they don't have a writerId (not from library) and have all required fields.
+      
+      // FIX: Refactored writer saving logic to be a functional map, avoiding mutation
+      // during iteration and resolving a potential race condition.
+      const writersToSubmit = await Promise.all(writers.map(async (writer) => {
+          // A writer is new if they don't have a writerId and have all required fields.
           if (!writer.writerId && writer.name && writer.dob && writer.society && writer.ipi) {
               const newManagedWriter = await onAddManagedWriter({
                   name: writer.name,
@@ -330,10 +358,12 @@ const SongRegistration: React.FC<SongRegistrationProps> = ({ onRegistrationCompl
                   ipi: writer.ipi,
               });
               if (newManagedWriter) {
-                  // Update the writer in our local array with the ID from the database
-                  writersToSubmit[index] = { ...writer, writerId: newManagedWriter.id };
+                  // Return a new writer object with the ID from the database
+                  return { ...writer, writerId: newManagedWriter.id };
               }
           }
+          // If not a new writer, or if saving failed, return the original writer object
+          return writer;
       }));
 
       const newSong: RegisteredSong = {
