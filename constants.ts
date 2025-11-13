@@ -1,5 +1,6 @@
 
 
+
 import { RegisteredSong, ManagedWriter, User, Earning, Platforms, RevenueSources, PayoutRequest, RoleDefinition, ChatSession, ChatMessage, SyncDeal, DealStatus } from './types';
 
 export const PUBLISHING_AGREEMENT_TEXT = `
@@ -221,11 +222,11 @@ export const mockSongs: RegisteredSong[] = [
 
 // FIX: Added missing mock data exports required by App.tsx.
 export const mockEarnings: Earning[] = [
-    { id: 'earn-1', songId: 'song-1', amount: 120.50, platform: 'spotify', source: 'mechanical', earningDate: '2023-10-15' },
-    { id: 'earn-2', songId: 'song-1', amount: 80.25, platform: 'apple_music', source: 'performance', earningDate: '2023-10-20' },
-    { id: 'earn-3', songId: 'song-2', amount: 250.00, platform: 'youtube', source: 'sync', earningDate: '2023-11-01' },
-    { id: 'earn-4', songId: 'song-3', amount: 45.75, platform: 'spotify', source: 'mechanical', earningDate: '2023-11-05' },
-    { id: 'earn-5', songId: 'song-4', amount: 1000.00, platform: 'other', source: 'sync', earningDate: '2023-11-10' },
+    { id: 'earn-1', songId: 'song-1', amount: 120.50, platform: 'spotify', source: 'mechanical', createdAt: '2023-10-15' },
+    { id: 'earn-2', songId: 'song-1', amount: 80.25, platform: 'apple_music', source: 'performance', createdAt: '2023-10-20' },
+    { id: 'earn-3', songId: 'song-2', amount: 250.00, platform: 'youtube', source: 'sync', createdAt: '2023-11-01' },
+    { id: 'earn-4', songId: 'song-3', amount: 45.75, platform: 'spotify', source: 'mechanical', createdAt: '2023-11-05' },
+    { id: 'earn-5', songId: 'song-4', amount: 1000.00, platform: 'other', source: 'sync', createdAt: '2023-11-10' },
 ];
 
 export const mockPayouts: PayoutRequest[] = [

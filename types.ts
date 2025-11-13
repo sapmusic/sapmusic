@@ -75,7 +75,7 @@ export interface Earning {
     amount: number;
     platform: Platform;
     source: RevenueSource;
-    earningDate: string;
+    createdAt: string;
 }
 
 export type PayoutStatus = 'pending' | 'approved' | 'paid';

@@ -1,10 +1,17 @@
 
 import React, { useState } from 'react';
+import ReactDOM from 'react-dom/client';
 import { LogoIcon } from './icons/LogoIcon';
 import { MailIcon } from './icons/MailIcon';
 import { LockClosedIcon } from './icons/LockClosedIcon';
 import { supabase } from '../services/supabase';
 import { UserCircleIcon } from './icons/UserCircleIcon';
+import PrintableUserAgreement from './PrintableUserAgreement';
+import { PUBLISHING_AGREEMENT_TEXT } from '../constants';
+
+// Let TypeScript know about the globals from the script tags
+declare const jspdf: any;
+declare const html2canvas: any;
 
 type Mode = 'login' | 'signup' | 'forgotPassword';
 
@@ -54,20 +61,74 @@ const Login: React.FC = () => {
             password,
             options: {
                 data: {
-                    name: name, // Pass name here for the trigger to use
+                    name: name,
                 }
             }
         });
 
         if (signUpError) {
             setError(signUpError.message);
-        } else if (data.user) {
-            // The database trigger 'on_auth_user_created' now handles profile creation.
-            setSuccessMessage('Account created! Please check your email to verify your account before logging in.');
+            setLoading(false);
+            return;
+        } 
+        
+        if (data.user) {
+            setSuccessMessage('Account created! Generating your agreement...');
+            try {
+                // 1. Create a hidden container for rendering
+                const container = document.createElement('div');
+                container.style.position = 'absolute';
+                container.style.left = '-9999px';
+                document.body.appendChild(container);
+
+                // 2. Render the agreement component
+                const root = ReactDOM.createRoot(container);
+                const signupDate = new Date().toISOString();
+                root.render(
+                    <PrintableUserAgreement 
+                        userName={name} 
+                        signupDate={signupDate}
+                        agreementText={PUBLISHING_AGREEMENT_TEXT}
+                    />
+                );
+
+                // 3. Wait for render and capture with html2canvas
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const canvas = await html2canvas(container.firstElementChild as HTMLElement, { scale: 2 });
+                
+                // 4. Create PDF and get a Blob
+                const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const imgData = canvas.toDataURL('image/png');
+                const imgProps = pdf.getImageProperties(imgData);
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                const pdfBlob = pdf.output('blob');
+                
+                // 5. Upload to Supabase Storage
+                const filePath = `${data.user.id}/exclusive_publishing_agreement.pdf`;
+                const { error: uploadError } = await supabase.storage
+                    .from('agreements')
+                    .upload(filePath, pdfBlob);
+                
+                // 6. Cleanup the temporary DOM element
+                root.unmount();
+                document.body.removeChild(container);
+
+                if (uploadError) throw uploadError;
+
+                setSuccessMessage('Account created! Please check your email to verify. Your agreement has been saved.');
+
+            } catch (pdfError: any) {
+                console.error("Failed to generate or upload agreement PDF:", pdfError);
+                setSuccessMessage('Account created! Please check your email. NOTE: we could not save your agreement automatically, please contact support.');
+            }
+
             setMode('login'); // Switch back to login view
+            // Clear fields but keep success message
+            setName('');
             setEmail('');
             setPassword('');
-            setName('');
         }
         
         setLoading(false);
@@ -131,7 +192,7 @@ const Login: React.FC = () => {
                             <p className="text-xs text-slate-500 mt-1">Password should be at least 6 characters.</p>
                         </div>
                         <button type="submit" disabled={loading} className="w-full bg-amber-500 text-slate-900 font-bold text-lg py-3 rounded-lg hover:bg-amber-400 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors">
-                            {loading ? 'Creating Account...' : 'Create Account'}
+                            {loading ? 'Processing...' : 'Create Account'}
                         </button>
                     </form>
                 );

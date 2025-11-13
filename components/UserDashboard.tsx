@@ -1,7 +1,7 @@
 
 
 import React, { useMemo } from 'react';
-import { RegisteredSong, Earning, User, SyncDeal, DealStatus } from '../types';
+import { RegisteredSong, Earning, User, SyncDeal, DealStatus, ManagedWriter } from '../types';
 import { SongIcon } from './icons/SongIcon';
 import { AgreementIcon } from './icons/AgreementIcon';
 import { AddIcon } from './icons/AddIcon';
@@ -19,10 +19,22 @@ interface UserDashboardProps {
   syncDeals: SyncDeal[];
   onUpdateDealStatus: (dealId: string, status: DealStatus) => void;
   onViewSongDetails: (song: RegisteredSong) => void;
+  managedWriters: ManagedWriter[];
 }
 
 const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+};
+
+const DealStatusBadge: React.FC<{ status: DealStatus }> = ({ status }) => {
+    const baseClasses = 'text-xs font-bold py-1 px-2.5 rounded-full capitalize';
+    const styles: Record<DealStatus, string> = {
+        offered: 'bg-blue-500/20 text-blue-300',
+        accepted: 'bg-green-500/20 text-green-300',
+        rejected: 'bg-red-500/20 text-red-400',
+        expired: 'bg-slate-500/20 text-slate-300',
+    };
+    return <span className={`${baseClasses} ${styles[status]}`}>{status}</span>;
 };
 
 const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: string | number }> = ({ icon, label, value }) => (
@@ -61,28 +73,47 @@ const SongListItem: React.FC<{ song: RegisteredSong, onClick: () => void }> = ({
     </button>
 )};
 
-const UserDashboard: React.FC<UserDashboardProps> = ({ songs, earnings, currentUser, onRegisterNew, syncDeals, onUpdateDealStatus, onViewSongDetails }) => {
+const UserDashboard: React.FC<UserDashboardProps> = ({ songs, earnings, currentUser, onRegisterNew, syncDeals, onUpdateDealStatus, onViewSongDetails, managedWriters }) => {
     const activeAgreements = songs.filter(s => s.status === 'active').length;
     
     const userLifetimeEarnings = useMemo(() => {
         let total = 0;
+        const userManagedWriterIds = new Set(
+            managedWriters
+                .filter(mw => mw.userId === currentUser.id)
+                .map(mw => mw.id)
+        );
         const userSongIds = new Set(songs.map(s => s.id));
-        
+
         earnings.forEach(earning => {
             if (userSongIds.has(earning.songId)) {
                 const song = songs.find(s => s.id === earning.songId);
-                const writer = song?.writers.find(w => w.writerId === currentUser.id || w.name === currentUser.name);
-                if (writer) {
-                    total += earning.amount * (writer.split / 100);
+                let userSplitForSong = 0;
+                song?.writers.forEach(writer => {
+                    if ((writer.writerId && userManagedWriterIds.has(writer.writerId)) || writer.name === currentUser.name) {
+                        userSplitForSong += writer.split;
+                    }
+                });
+
+                if (userSplitForSong > 0) {
+                    total += earning.amount * (userSplitForSong / 100);
                 }
             }
         });
         return total;
-    }, [songs, earnings, currentUser]);
+    }, [songs, earnings, currentUser, managedWriters]);
 
-    const userOfferedDeals = useMemo(() => {
+    const userSyncDeals = useMemo(() => {
         const userSongIds = new Set(songs.map(s => s.id));
-        return syncDeals.filter(deal => userSongIds.has(deal.songId) && deal.status === 'offered');
+        return syncDeals
+            .filter(deal => userSongIds.has(deal.songId))
+            .sort((a, b) => {
+                // Keep offered deals on top
+                if (a.status === 'offered' && b.status !== 'offered') return -1;
+                if (a.status !== 'offered' && b.status === 'offered') return 1;
+                // Then sort by date
+                return new Date(b.offerDate).getTime() - new Date(a.offerDate).getTime()
+            });
     }, [songs, syncDeals]);
 
 
@@ -98,37 +129,40 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ songs, earnings, currentU
                 <StatCard icon={<EarningsIcon className="h-6 w-6 text-teal-400" />} label="Your Lifetime Earnings" value={new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(userLifetimeEarnings)} />
             </div>
 
-            {userOfferedDeals.length > 0 && (
+            {userSyncDeals.length > 0 && (
                 <div className="space-y-4">
                     <h2 className="text-xl font-semibold text-white flex items-center gap-2">
                         <SyncIcon className="h-6 w-6 text-amber-400" />
-                        Sync Licensing Opportunities
+                        Sync Licensing Deals
                     </h2>
                     <div className="space-y-3">
-                       {userOfferedDeals.map(deal => {
+                       {userSyncDeals.map(deal => {
                            const song = songs.find(s => s.id === deal.songId);
                            if (!song) return null;
                            return (
-                               <div key={deal.id} className="bg-slate-800 p-4 rounded-lg border-l-4 border-amber-400">
+                               <div key={deal.id} className={`bg-slate-800 p-4 rounded-lg border-l-4 ${deal.status === 'offered' ? 'border-amber-400' : 'border-slate-700'}`}>
                                    <div className="flex justify-between items-start gap-4">
                                        <div>
-                                           <p className="text-xs text-amber-400 font-bold uppercase">{deal.dealType} Offer</p>
+                                           <p className="text-xs text-amber-400 font-bold uppercase">{deal.dealType}</p>
                                            <p className="font-semibold text-white">"{song.title}" for {deal.licensee}</p>
                                            <p className="text-sm text-slate-400 mt-2">{deal.terms}</p>
                                        </div>
-                                       <div className="text-right flex-shrink-0">
+                                       <div className="text-right flex-shrink-0 space-y-1">
                                             <p className="text-2xl font-bold text-green-400">{formatCurrency(deal.fee)}</p>
-                                            <p className="text-xs text-slate-500">Expires {new Date(deal.expiryDate).toLocaleDateString()}</p>
+                                            <DealStatusBadge status={deal.status} />
                                        </div>
                                    </div>
-                                   <div className="mt-4 pt-4 border-t border-slate-700/50 flex justify-end gap-3">
-                                       <button onClick={() => onUpdateDealStatus(deal.id, 'rejected')} className="flex items-center gap-2 bg-red-500/10 text-red-400 font-bold py-2 px-4 rounded-lg hover:bg-red-500/20 transition-colors">
-                                           <XCircleIcon className="h-5 w-5" /> Reject
-                                       </button>
-                                       <button onClick={() => onUpdateDealStatus(deal.id, 'accepted')} className="flex items-center gap-2 bg-green-500/10 text-green-300 font-bold py-2 px-4 rounded-lg hover:bg-green-500/20 transition-colors">
-                                            <CheckCircleIcon className="h-5 w-5" /> Accept
-                                       </button>
-                                   </div>
+                                   {deal.status === 'offered' && (
+                                       <div className="mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-end gap-3">
+                                            <p className="text-xs text-slate-500 mr-auto">Expires {new Date(deal.expiryDate).toLocaleDateString()}</p>
+                                           <button onClick={() => onUpdateDealStatus(deal.id, 'rejected')} className="flex items-center gap-2 bg-red-500/10 text-red-400 font-bold py-2 px-4 rounded-lg hover:bg-red-500/20 transition-colors">
+                                               <XCircleIcon className="h-5 w-5" /> Reject
+                                           </button>
+                                           <button onClick={() => onUpdateDealStatus(deal.id, 'accepted')} className="flex items-center gap-2 bg-green-500/10 text-green-300 font-bold py-2 px-4 rounded-lg hover:bg-green-500/20 transition-colors">
+                                                <CheckCircleIcon className="h-5 w-5" /> Accept
+                                           </button>
+                                       </div>
+                                   )}
                                </div>
                            )
                        })}

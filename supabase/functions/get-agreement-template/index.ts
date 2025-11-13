@@ -12,7 +12,6 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight requests.
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -20,55 +19,47 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Authorization header is required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'Authorization header is required' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-    
+
+    // First, verify the user is authenticated.
     const userSupabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
-    )
-
+    );
     const { data: { user } } = await userSupabaseClient.auth.getUser();
     if (!user) {
         return new Response(JSON.stringify({ error: 'Authentication failed' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // FIX: Moved secret fetching and admin client initialization inside the request handler.
-    // This prevents a function startup crash if secrets are missing, allowing a proper error response to be sent.
+    // Now, create an admin client to fetch settings, bypassing RLS.
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if (!serviceRoleKey) {
-        throw new Error('Server configuration error: Missing SUPABASE_SERVICE_ROLE_KEY secret in Edge Function settings.');
+        throw new Error('Server configuration error: Missing SUPABASE_SERVICE_ROLE_KEY secret.');
     }
     const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      serviceRoleKey
+        Deno.env.get('SUPABASE_URL') ?? '',
+        serviceRoleKey
     );
     
-    const { data: adminProfile, error: profileError } = await supabaseAdmin
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
+    const { data: settingsData, error: settingsError } = await supabaseAdmin
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'publishing_agreement_text')
       .single();
 
-    if (profileError || !adminProfile || adminProfile.role !== 'admin') {
-      return new Response(JSON.stringify({ error: 'Permission denied. Admin role required.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-    
-    // If admin, use the service role key to fetch all user profiles.
-    const { data: profilesData, error: profilesDbError } = await supabaseAdmin
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-    if (profilesDbError) {
-        throw profilesDbError;
+    if (settingsError) {
+        // If the row doesn't exist, it's not a server error, just no template.
+        if (settingsError.code === 'PGRST116') {
+             return new Response(JSON.stringify({ template: null }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
+        throw settingsError;
     }
 
-    return new Response(JSON.stringify({ users: profilesData || [] }), {
+    return new Response(JSON.stringify({ template: settingsData?.value || null }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
@@ -76,4 +67,4 @@ Deno.serve(async (req: Request) => {
     console.error('Function error:', err.message);
     return new Response(JSON.stringify({ error: err?.message ?? String(err) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
-})
+});

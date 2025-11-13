@@ -2,8 +2,7 @@
 // which doesn't have Deno's native types available.
 declare const Deno: any;
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { Resend } from 'npm:resend'
+import { Resend } from 'https://esm.sh/resend@3.2.0'
 
 // FIX: Added CORS headers to allow requests from the browser client.
 const corsHeaders = {
@@ -11,11 +10,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-
-
-// Initialize Resend with the API key from environment variables
-// Make sure to set RESEND_API_KEY in your Supabase project's secrets
-const resend = new Resend(Deno.env.get('RESEND_API_KEY')!)
 
 // Define email templates based on status
 const templates = {
@@ -42,13 +36,21 @@ const templates = {
   }
 }
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   // FIX: Handle CORS preflight requests.
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   try {
+    // FIX: Moved secret fetching and Resend client initialization inside the request handler.
+    // This prevents a function startup crash if the secret is missing, allowing a proper error response to be sent.
+    const resendApiKey = Deno.env.get('RESEND_API_KEY');
+    if (!resendApiKey) {
+        throw new Error('Server configuration error: Missing RESEND_API_KEY secret in Edge Function settings.');
+    }
+    const resend = new Resend(resendApiKey);
+
     const { userEmail, userName, songTitle, newStatus } = await req.json()
 
     // Validate payload
@@ -68,7 +70,7 @@ serve(async (req: Request) => {
 
     if (error) {
       console.error('Resend API error:', error);
-      return new Response(JSON.stringify({ error }), { // FIX: Send the error object for better debugging.
+      return new Response(JSON.stringify({ error: error.message, name: error.name }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })

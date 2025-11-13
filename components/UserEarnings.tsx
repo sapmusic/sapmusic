@@ -1,5 +1,7 @@
+
+
 import React, { useState, useMemo } from 'react';
-import { RegisteredSong, Earning, User, PayoutRequest } from '../types';
+import { RegisteredSong, Earning, User, PayoutRequest, ManagedWriter } from '../types';
 import { EarningsIcon } from './icons/EarningsIcon';
 import RequestPayoutModal from './RequestPayoutModal';
 import { PAYOUT_THRESHOLD } from '../constants';
@@ -10,31 +12,39 @@ interface UserEarningsProps {
   currentUser: User;
   payoutRequests: PayoutRequest[];
   onPayoutRequest: (request: Omit<PayoutRequest, 'id' | 'status'>) => void;
+  managedWriters: ManagedWriter[];
 }
 
 const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 };
 
-const UserEarnings: React.FC<UserEarningsProps> = ({ songs, earnings, currentUser, payoutRequests, onPayoutRequest }) => {
+const UserEarnings: React.FC<UserEarningsProps> = ({ songs, earnings, currentUser, payoutRequests, onPayoutRequest, managedWriters }) => {
     const [isPayoutModalOpen, setIsPayoutModalOpen] = useState(false);
 
     const { userLifetimeEarnings, songEarningsBreakdown } = useMemo(() => {
         let total = 0;
         const breakdown: { song: RegisteredSong, userShare: number, totalEarnings: number }[] = [];
-        
+        const userManagedWriterIds = new Set(managedWriters.filter(mw => mw.userId === currentUser.id).map(mw => mw.id));
+
         songs.forEach(song => {
-            const writer = song.writers.find(w => w.writerId === currentUser.id || w.name === currentUser.name);
-            if (writer) {
+            let userSplitForSong = 0;
+            song.writers.forEach(writer => {
+                if ((writer.writerId && userManagedWriterIds.has(writer.writerId)) || writer.name === currentUser.name) {
+                    userSplitForSong += writer.split;
+                }
+            });
+
+            if (userSplitForSong > 0) {
                 const songTotalEarnings = earnings.filter(e => e.songId === song.id).reduce((sum, e) => sum + e.amount, 0);
-                const userShare = songTotalEarnings * (writer.split / 100);
+                const userShare = songTotalEarnings * (userSplitForSong / 100);
                 total += userShare;
                 breakdown.push({ song, userShare, totalEarnings: songTotalEarnings });
             }
         });
 
         return { userLifetimeEarnings: total, songEarningsBreakdown: breakdown };
-    }, [songs, earnings, currentUser]);
+    }, [songs, earnings, currentUser, managedWriters]);
 
     const totalWithdrawnOrPending = useMemo(() => {
         // A request locks the funds, so we deduct all statuses from the available balance.
@@ -54,7 +64,7 @@ const UserEarnings: React.FC<UserEarningsProps> = ({ songs, earnings, currentUse
         const userSongIds = new Set(songs.map(s => s.id));
         return earnings
             .filter(e => userSongIds.has(e.songId))
-            .sort((a, b) => new Date(b.earningDate).getTime() - new Date(a.earningDate).getTime())
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(0, 10);
     }, [songs, earnings]);
 
@@ -142,7 +152,7 @@ const UserEarnings: React.FC<UserEarningsProps> = ({ songs, earnings, currentUse
                                 <div key={earning.id} className="bg-slate-800/50 p-3 rounded-md text-sm">
                                     <div className="flex justify-between items-center">
                                         <p className="font-semibold text-white">{formatCurrency(userShare)}</p>
-                                        <p className="text-slate-400">{new Date(earning.earningDate).toLocaleDateString()}</p>
+                                        <p className="text-slate-400">{new Date(earning.createdAt).toLocaleDateString()}</p>
                                     </div>
                                     <p className="text-xs text-slate-300">
                                         {song ? `${song.title}` : 'Unknown Song'}

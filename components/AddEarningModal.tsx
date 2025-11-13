@@ -1,3 +1,6 @@
+
+
+
 import React, { useState } from 'react';
 import { RegisteredSong, Earning, Platform, RevenueSource } from '../types';
 import { PLATFORMS, REVENUE_SOURCES } from '../constants';
@@ -7,7 +10,7 @@ import { DollarSignIcon } from './icons/DollarSignIcon';
 interface AddEarningModalProps {
   song: RegisteredSong;
   onClose: () => void;
-  onAddEarning: (earning: Omit<Earning, 'id'>) => void;
+  onAddEarning: (earning: Omit<Earning, 'id'>) => Promise<{ success: boolean; error?: any }>;
 }
 
 const AddEarningModal: React.FC<AddEarningModalProps> = ({ song, onClose, onAddEarning }) => {
@@ -16,20 +19,29 @@ const AddEarningModal: React.FC<AddEarningModalProps> = ({ song, onClose, onAddE
     const [source, setSource] = useState<RevenueSource>(REVENUE_SOURCES[0]);
     const [earningDate, setEarningDate] = useState(new Date().toISOString().split('T')[0]);
     const [error, setError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!amount || amount <= 0 || !platform || !source || !earningDate) {
             setError('All fields are required and amount must be positive.');
             return;
         }
+        setError('');
+        setIsSubmitting(true);
 
-        onAddEarning({
+        const result = await onAddEarning({
             songId: song.id,
             amount: Number(amount),
-            platform,
-            source,
-            earningDate,
+            platform: platform,
+            source: source,
+            createdAt: earningDate,
         });
+        
+        setIsSubmitting(false);
+
+        if (!result.success) {
+            setError(result.error?.message || 'Failed to add earning record. Please try again.');
+        }
     };
     
     const formatLabel = (label: string) => {
@@ -112,10 +124,15 @@ const AddEarningModal: React.FC<AddEarningModalProps> = ({ song, onClose, onAddE
                     </button>
                     <button
                         onClick={handleSubmit}
-                        className="flex items-center gap-2 bg-amber-500 text-slate-900 font-bold py-2 px-4 rounded-lg hover:bg-amber-400 transition-colors"
+                        disabled={isSubmitting}
+                        className="flex items-center gap-2 bg-amber-500 text-slate-900 font-bold py-2 px-4 rounded-lg hover:bg-amber-400 transition-colors disabled:bg-slate-600 disabled:cursor-wait"
                     >
-                        <DollarSignIcon className="w-5 h-5" />
-                        Add Earning
+                        {isSubmitting ? 'Adding...' : (
+                            <>
+                                <DollarSignIcon className="w-5 w-5" />
+                                Add Earning
+                            </>
+                        )}
                     </button>
                 </footer>
             </div>

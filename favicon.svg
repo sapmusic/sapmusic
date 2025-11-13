@@ -1,0 +1,41 @@
+<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <mask id="sg-logo-mask">
+            <rect x="0" y="0" width="80" height="80" fill="white" />
+            <text 
+                x="40" 
+                y="22"
+                font-family="Inter, sans-serif" 
+                font-weight="bold"
+                font-size="36"
+                text-anchor="middle" 
+                dominant-baseline="central"
+                fill="black"
+            >
+                S
+            </text>
+            <text 
+                x="40" 
+                y="58"
+                font-family="Inter, sans-serif" 
+                font-weight="bold"
+                font-size="36"
+                text-anchor="middle" 
+                dominant-baseline="central"
+                fill="black"
+            >
+                G
+            </text>
+        </mask>
+    </defs>
+    
+    <rect 
+        x="0" 
+        y="0" 
+        width="80" 
+        height="80" 
+        rx="16"
+        fill="#facc15"
+        mask="url(#sg-logo-mask)"
+    />
+</svg>

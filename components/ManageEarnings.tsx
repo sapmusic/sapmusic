@@ -1,3 +1,6 @@
+
+
+
 import React, { useState, useMemo } from 'react';
 import { RegisteredSong, Earning } from '../types';
 import { SearchIcon } from './icons/SearchIcon';
@@ -7,7 +10,7 @@ import AddEarningModal from './AddEarningModal';
 interface ManageEarningsProps {
   songs: RegisteredSong[];
   earnings: Earning[];
-  onAddEarning: (earning: Omit<Earning, 'id'>) => void;
+  onAddEarning: (earning: Omit<Earning, 'id'>) => Promise<{ success: boolean; error?: any }>;
 }
 
 const formatCurrency = (amount: number) => {
@@ -29,7 +32,7 @@ const ManageEarnings: React.FC<ManageEarningsProps> = ({ songs, earnings, onAddE
     
     const recentTransactions = useMemo(() => {
         return [...earnings]
-            .sort((a, b) => new Date(b.earningDate).getTime() - new Date(a.earningDate).getTime())
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(0, 5);
     }, [earnings]);
 
@@ -45,9 +48,12 @@ const ManageEarnings: React.FC<ManageEarningsProps> = ({ songs, earnings, onAddE
         setIsModalOpen(true);
     }
     
-    const handleAddEarning = (earning: Omit<Earning, 'id'>) => {
-        onAddEarning(earning);
-        setIsModalOpen(false);
+    const handleAddEarning = async (earning: Omit<Earning, 'id'>) => {
+        const result = await onAddEarning(earning);
+        if (result.success) {
+            setIsModalOpen(false);
+        }
+        return result;
     }
 
     return (
@@ -108,7 +114,7 @@ const ManageEarnings: React.FC<ManageEarningsProps> = ({ songs, earnings, onAddE
                                 <div key={earning.id} className="bg-slate-700/50 p-3 rounded-md text-sm">
                                     <div className="flex justify-between items-center">
                                         <p className="font-semibold text-white">{formatCurrency(earning.amount)}</p>
-                                        <p className="text-slate-400">{new Date(earning.earningDate).toLocaleDateString()}</p>
+                                        <p className="text-slate-400">{new Date(earning.createdAt).toLocaleDateString()}</p>
                                     </div>
                                     <p className="text-xs text-slate-300">
                                         {song ? `${song.title} - ${song.artist}` : 'Unknown Song'}
